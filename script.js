@@ -49,6 +49,31 @@
       : `<strong>AI 생활도우미 샘플 답변</strong><p><span class="vi-text">${sample.vi}</span><span class="ko-text">${sample.ko}</span></p><a class="outline-btn" href="#${sample.target}">관련 페이지 보기</a>`;
   }
 
+  function showAiApiAnswer(message) {
+    const answer = $('#aiAnswer');
+    answer.hidden = false;
+    answer.replaceChildren();
+    const title = document.createElement('strong');
+    const body = document.createElement('p');
+    title.textContent = 'AI 생활도우미 답변';
+    body.textContent = message;
+    answer.append(title, body);
+  }
+
+  function getChatAnswer(payload) {
+    const candidates = [
+      payload && payload.answer,
+      payload && payload.message,
+      payload && payload.reply,
+      payload && payload.text,
+      payload && payload.response,
+      payload && payload.response && payload.response.text,
+      payload && payload.data && payload.data.answer
+    ];
+    const answer = candidates.find((value) => typeof value === 'string' && value.trim());
+    return answer ? answer.trim() : '';
+  }
+
   function validate(form) {
     const required = Array.from(form.querySelectorAll('[required]'));
     const missing = required.find((field) => !String(field.value).trim());
@@ -60,6 +85,7 @@
   }
 
   function wireEvents() {
+    let isAskingAi = false;
     const menu = $('#sideMenu');
     $('.menu-toggle').addEventListener('click', () => { menu.hidden = false; $('.menu-toggle').setAttribute('aria-expanded', 'true'); });
     $('.close-menu').addEventListener('click', () => { menu.hidden = true; $('.menu-toggle').setAttribute('aria-expanded', 'false'); });
@@ -71,11 +97,42 @@
       localStorage.setItem('samsung-house-language', koreanFirst ? 'ko' : 'vi');
     });
     $$('[data-scroll-target]').forEach((button) => button.addEventListener('click', () => $(`#${button.dataset.scrollTarget}`).scrollIntoView({ behavior: 'smooth' })));
-    $('#aiAskBtn').addEventListener('click', () => { const q = $('#aiQuery').value.trim(); if (q) showAiAnswer(q); });
+    const askAi = async (question) => {
+      const query = String(question || '').trim();
+      const button = $('#aiAskBtn');
+      const input = $('#aiQuery');
+      if (!query || isAskingAi) return;
+
+      isAskingAi = true;
+      button.disabled = true;
+      input.setAttribute('aria-busy', 'true');
+      showAiApiAnswer('답변을 생성하고 있습니다...');
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ message: query })
+        });
+        if (!response.ok) throw new Error(`Chat request failed: ${response.status}`);
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) throw new Error('Chat response was not JSON');
+        const answer = getChatAnswer(await response.json());
+        if (!answer) throw new Error('Chat response did not include an answer');
+        showAiApiAnswer(answer);
+      } catch (error) {
+        console.error('Chat request failed.', error);
+        showAiApiAnswer('답변을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      } finally {
+        isAskingAi = false;
+        button.disabled = false;
+        input.removeAttribute('aria-busy');
+      }
+    };
+    $('#aiAskBtn').addEventListener('click', () => askAi($('#aiQuery').value));
     $('#aiQuery').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); $('#aiAskBtn').click(); } });
     document.addEventListener('click', (event) => {
       const question = event.target.closest('[data-question]');
-      if (question) { $('#aiQuery').value = question.dataset.question; showAiAnswer(question.dataset.question); }
+      if (question) { $('#aiQuery').value = question.dataset.question; askAi(question.dataset.question); }
       const guide = event.target.closest('[data-guide]');
       if (guide) renderGuide(guide.dataset.guide);
     });
