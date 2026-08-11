@@ -36,7 +36,11 @@ async function chat(request, env) {
     },
   );
 
-  if (!response.ok) return json({ error: "The chat service is temporarily unavailable." }, 502);
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 500);
+    console.error(`Gemini API request failed (${response.status}): ${detail}`);
+    return json({ error: "The chat service is temporarily unavailable." }, 502);
+  }
 
   const result = await response.json();
   const text = result.candidates?.[0]?.content?.parts
